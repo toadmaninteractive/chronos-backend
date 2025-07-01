@@ -1,0 +1,183 @@
+#!/bin/bash
+# -*- tab-width:4;indent-tabs-mode:nil -*-
+# ex: ts=4 sw=4 et
+
+RUNNER_SCRIPT_DIR=$(cd ${0%/*} && pwd)
+
+RUNNER_BASE_DIR=${RUNNER_SCRIPT_DIR%/*}
+. $RUNNER_BASE_DIR/${SERVER_CONF:-etc/server.conf}
+PIPE_DIR=/tmp/$RUNNER_BASE_DIR/$SERVER_CONF
+
+# Default values
+APP_CONFIG=$RUNNER_BASE_DIR/${APP_CONFIG:-etc/app.config}
+VM_ARGS=$RUNNER_BASE_DIR/${VM_ARGS:-etc/vm.args}
+LOG_DIR=$RUNNER_BASE_DIR/${LOG_DIR:-log}
+
+# Make sure this script is running as the appropriate user
+if [ ! -z "$RUN_AS_USER" ] && [ `whoami` != "$RUN_AS_USER" ]; then
+    exec sudo -u $RUN_AS_USER -i $RUNNER_SCRIPT_DIR/server $1 $2
+fi
+
+# Make sure CWD is set to runner base dir
+cd $RUNNER_BASE_DIR
+
+# Make sure log directory exists
+mkdir -p $LOG_DIR
+
+# Extract the target node name from node.args
+NAME_ARG=`grep -e '-[s]*name' $VM_ARGS`
+if [ -z "$NAME_ARG" ]; then
+    echo "vm.args needs to have either -name or -sname parameter."
+    exit 1
+fi
+
+# Extract the target cookie
+COOKIE_ARG=`grep -e '-setcookie' $VM_ARGS`
+if [ -z "$COOKIE_ARG" ]; then
+    echo "vm.args needs to have a -setcookie parameter."
+    exit 1
+fi
+
+# Identify the script name
+SCRIPT=`basename $0`
+
+# Parse out release and erts info
+START_ERL=`cat $RUNNER_BASE_DIR/releases/start_erl.data`
+ERTS_VSN=${START_ERL% *}
+APP_VSN=${START_ERL#* }
+
+# Add ERTS bin dir to our path
+ERTS_PATH=$RUNNER_BASE_DIR/erts-$ERTS_VSN/bin
+
+# Setup command to control the node
+NODETOOL="$ERTS_PATH/escript $ERTS_PATH/nodetool $NAME_ARG $COOKIE_ARG"
+
+# Check the first argument for instructions
+case "$1" in
+    start)
+        # Make sure there is not already a node running
+        RES=`$NODETOOL ping`
+        if [ "$RES" = "pong" ]; then
+            echo "Node is already running!"
+            exit 1
+        fi
+        HEART_COMMAND="export SERVER_CONF=$SERVER_CONF && $RUNNER_BASE_DIR/bin/$SCRIPT start"
+        export HEART_COMMAND
+        mkdir -p $PIPE_DIR
+        # Note the trailing slash on $PIPE_DIR/
+        $ERTS_PATH/run_erl -daemon $PIPE_DIR/ $LOG_DIR "exec $RUNNER_BASE_DIR/bin/$SCRIPT console" 2>&1
+        ;;
+
+    stop)
+        # Wait for the node to completely stop...
+        case `uname -s` in
+            Linux|Darwin|FreeBSD|DragonFly|NetBSD|OpenBSD)
+                # PID COMMAND
+                PID=`ps ax -o pid= -o command=|\
+                    grep "$RUNNER_BASE_DIR/.*/[b]eam"|\
+                    grep "name $NAME_ARG"|awk '{print $1}'`
+                ;;
+            SunOS)
+                # PID COMMAND
+                PID=`ps -ef -o pid= -o args=|\
+                    grep "$RUNNER_BASE_DIR/.*/[b]eam"|awk '{print $1}'`
+                ;;
+            CYGWIN*)
+                # UID PID PPID TTY STIME COMMAND
+                PID=`ps -efW|grep "$RUNNER_BASE_DIR/.*/[b]eam"|awk '{print $2}'`
+                ;;
+        esac
+        $NODETOOL stop
+        while `kill -0 $PID 2>/dev/null`;
+        do
+            sleep 1
+        done
+        ;;
+
+    restart)
+        ## Restart the VM without exiting the process
+        $NODETOOL restart
+        ;;
+
+    reboot)
+        ## Restart the VM completely (uses heart to restart it)
+        $NODETOOL reboot
+        ;;
+
+    ping)
+        ## See if the VM is alive
+        $NODETOOL ping
+        ;;
+
+    rpc)
+        ## RPC call
+        $NODETOOL rpc ${*:2}
+        ;;
+
+    attach)
+        # Make sure a node IS running
+        RES=`$NODETOOL ping`
+        if [ "$RES" != "pong" ]; then
+            echo "Node is not running!"
+            exit 1
+        fi
+
+        shift
+        $ERTS_PATH/to_erl $PIPE_DIR/
+        ;;
+
+    console)
+        # Setup beam-required vars
+        ROOTDIR=$RUNNER_BASE_DIR
+        BINDIR=$ROOTDIR/erts-$ERTS_VSN/bin
+        EMU=beam
+        PROGNAME=`echo $0 | sed 's/.*\\///'`
+        CMD="$BINDIR/erlexec -boot $RUNNER_BASE_DIR/releases/$APP_VSN/$RELEASE -embedded -config $APP_CONFIG -args_file $VM_ARGS -- ${1+"$@"}"
+        export EMU
+        export ROOTDIR
+        export BINDIR
+        export PROGNAME
+
+        # Dump environment info for logging purposes
+        echo "Exec: $CMD"
+        echo "Root: $ROOTDIR"
+
+        # Log the startup
+        logger -t "$SCRIPT[$$]" "Starting up"
+
+        # Start the VM
+        exec $CMD
+        ;;
+
+    remsh)
+        REMNODE=`echo $NAME_ARG | cut -f2 -d" "`
+        MYNODE=remsh_"$$"_"$REMNODE"
+        CMD="$ERTS_PATH/erl -remsh $REMNODE -name $MYNODE $COOKIE_ARG"
+        exec $CMD
+        ;;
+    
+    etop)
+        REMNODE=`echo $NAME_ARG | cut -f2 -d" "`
+        MYNODE=remsh_"$$"_"$REMNODE"
+        CMD="$ERTS_PATH/erl -hidden -s etop -s erlang halt -output text -node $REMNODE -name $MYNODE $COOKIE_ARG $ETOP_ARGS ${*:2}"
+        exec $CMD
+        ;;
+
+    run)
+        CMD="$ERTS_PATH/erl -output text -config $APP_CONFIG -args_file $VM_ARGS -s ${*:2} -s init stop"
+        exec $CMD
+        ;;
+
+    erl)
+        CMD="$ERTS_PATH/erl -config $APP_CONFIG -args_file $VM_ARGS"
+        exec $CMD
+        ;;
+
+    *)
+        echo "Usage: $SCRIPT {start|stop|restart|reboot|ping|rpc|console|attach|remsh|etop|run|erl}"
+        exit 1
+        ;;
+esac
+
+exit 0
+

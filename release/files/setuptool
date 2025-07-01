@@ -1,0 +1,172 @@
+%% -------------------------------------------------------------------
+%% setuptool: Helper Script for applying patches to server configs
+%% -------------------------------------------------------------------
+
+main(Args) ->
+    try
+        do_main(Args)
+    catch
+        exit:error ->
+            halt(1);
+        exit:normal ->
+            net_kernel:stop()
+    end.
+
+info() ->
+"
+arguments:
+    -h                                          // show this help
+    -i <input file path>                        // input file
+    -p <patch file path>                        // patch file
+    -mp <multy patch file path> key1/.../keyN   // multy patch file
+    -o <output file path>                       // ouput file
+
+example 1: escript setuptool -i app.config.sample -p patch1.config -p patch2.config -o app.config
+example 2: escript setuptool -i app.config.sample -mp multypatch.config all/master -o app.config
+
+patch1.config:
+[
+app_name2,                          // remove app_name2 from config
+{app_name1, [
+    {param_key1, 1},                // update filed param_key1 in app_name1
+    param_key2                      // remove filed param_key2 from app_name1
+]}
+].
+
+multypatch.config:
+all.                                // key name
+[{app_name1, [{param_key, 1}]}].    // patch
+master.                             // key name
+[{app_name2, [{param_key, 1}]}].    // patch
+".
+
+do_main(Args) ->
+    Conf = parse_args(Args, []),
+    InputPath = proplists:get_value(input, Conf),
+    Input = hd(load(InputPath)),
+    OutputPath = proplists:get_value(output, Conf),
+    Patchs = [R || P <- proplists:get_value(patch, Conf), R <- load_patch(P)],
+    io:format("apply patches~n"),
+    Output = apply_patch(Input, Patchs),
+    io:format("save ~s~n", [OutputPath]),
+    file:write_file(OutputPath, format_configs(Output)),
+    io:format("done~n"),
+    exit(normal).
+
+check(Conf, Par) ->
+    case proplists:is_defined(Par, Conf) of
+        false ->
+            io:format("~s~n", [info()]),
+            exit(error);
+        _ ->
+            ok
+    end.
+
+parse_args(["-i", Input | Tail], Props) ->
+    parse_args(Tail, set_value(Props, input, Input));
+parse_args(["-p", Patch | Tail], Props) ->
+    List = proplists:get_value(patch, Props, []),
+    Props1 = set_value(Props, patch, List ++ [Patch]),
+    parse_args(Tail, Props1);
+parse_args(["-o", Output | Tail], Props) ->
+    parse_args(Tail, set_value(Props, output, Output));
+parse_args(["-mp", Patch, KeysStr | Tail], Props) ->
+    Keys = [list_to_atom(S) || S <- string:tokens(KeysStr, "/")],
+    List = proplists:get_value(patch, Props, []),
+    Props1 = set_value(Props, patch, List ++ [{Patch, Keys}]),
+    parse_args(Tail, Props1);
+parse_args(["-h"], _Props) ->
+    io:format("~s~n", [info()]),
+    exit(normal);
+parse_args([Arg | Tail], Props) ->
+    io:format("Unknown argument: ~s~n", [Arg]),
+    parse_args(Tail, Props);
+parse_args([], Props) ->
+    check(Props, input),
+    check(Props, patch),
+    check(Props, output),
+    Props.
+
+load(Path) ->
+    io:format("load ~s~n", [Path]),
+    case file:consult(Path) of
+        {ok, Data} ->
+            Data;
+        Error ->
+            io:format("Can't load: ~s~nError: ~p~n", [Path, Error]),
+            exit(error)
+    end.
+
+load_patch({Path, Filters}) ->
+    List = load(Path),
+    Props = parse_patch(List),
+    [proplists:get_value(F, Props) || F <- Filters];
+load_patch(Path) ->
+    load(Path).
+
+parse_patch([]) ->
+    [];
+parse_patch([Name, Body | Tail]) ->
+    [{Name, Body} | parse_patch(Tail)];
+parse_patch(Error) ->
+    io:format("Bad multy patch end: ~p~n", [Error]),
+    exit(error).
+
+apply_patch(Configs, Patchs) ->
+    lists:foldl(fun(Patch, Acc) -> 
+        lists:foldl(fun
+            ({App, Pairs}, Acc1) ->
+                lists:foldl(fun
+                    ({Key, Value}, Acc2) ->
+                        insert_config(Acc2, App, Key, Value);
+                    (Key, Acc2) when is_atom(Key) ->
+                        remove_config(Acc2, App, Key);
+                    (Key, _) ->
+                        io:format("Bad patch format: ~p -> ~p~n", [App, Key]),
+                        exit(error)
+                end, Acc1, Pairs);
+            (App, Acc1) when is_atom(App) ->
+                lists:keydelete(App, 1, Acc1);
+            (App, _) ->
+                io:format("Bad patch format: ~p~n", [App]),
+                exit(error)
+        end, Acc, Patch)
+    end, Configs, Patchs).
+
+remove_config(Configs, App, Key) ->
+    set_value(Configs, App, lists:keydelete(Key, 1, proplists:get_value(App, Configs, []))).
+
+insert_config(Configs, App, Key, Value) ->
+    set_value(Configs, App, set_value(proplists:get_value(App, Configs, []), Key, Value)).
+
+set_value(List, Key, Value) ->
+    lists:keystore(Key, 1, List, {Key, Value}).
+
+format_configs(Configs) ->
+    [
+        "% It is machine generated\n",
+        "% ", iso_8601_fmt(erlang:localtime()),
+        "\n\n",
+        "[\n",
+        join([[
+            "{", atom_to_list(App), ", [\n",
+            join([[
+                "    {", atom_to_list(Key), ", ", move(io_lib:format("~p", [Value])), "}"
+            ] || {Key, Value} <- Values], ",\n"),
+            "\n]}"
+        ] || {App, Values} <- Configs], ",\n"),
+        "\n]."
+    ].
+
+move(Text) ->
+    [if A =:= $\n -> "\n        "; true -> A end || A <- binary_to_list(iolist_to_binary(Text))].
+
+iso_8601_fmt(DateTime) ->
+    {{Year,Month,Day},{Hour,Min,Sec}} = DateTime,
+    io_lib:format("~4.10.0B-~2.10.0B-~2.10.0B ~2.10.0B:~2.10.0B:~2.10.0B",
+        [Year, Month, Day, Hour, Min, Sec]).
+
+join([], _Separator) ->
+    [];
+join([Head|List], Separator) ->
+    [Head, [[Separator, V] || V <- List]].

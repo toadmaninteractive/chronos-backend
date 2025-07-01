@@ -1,0 +1,16 @@
+# Set the default behavior, in case people don't have core.autocrlf set
+* text=auto
+
+# EOL: LF
+*.sh text eol=lf
+Makefile text eol=lf
+erl text eol=lf
+nodetool text eol=lf
+server text eol=lf
+setuptool text eol=lf
+server.conf text eol=lf
+vm.args text eol=lf
+
+# EOL: CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf

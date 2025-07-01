@@ -1,0 +1,5 @@
+Chronos DB Setup AS superuser
+=============================
+
+CREATE ROLE logger_user LOGIN password 'logger_pwd';
+CREATE DATABASE chronos ENCODING 'UTF8' OWNER logger_user;

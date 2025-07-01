@@ -1,0 +1,7 @@
+{application, util, [
+    {description, "Utilities"},
+    {vsn, "1.0.0"},
+    {modules, []},
+    {registered, []},
+    {applications, [kernel, stdlib, sasl]}
+]}.

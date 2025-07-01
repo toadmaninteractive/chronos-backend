@@ -1,0 +1,8 @@
+{application, slack, [
+    {description, "Slack integration service"},
+    {vsn, "1.0.0"},
+    {modules, []},
+    {registered, []},
+    {applications, [kernel, stdlib, sasl, ssl, inets, ecouch, catalogue, db]},
+    {mod, {slack_app, []}}
+]}.

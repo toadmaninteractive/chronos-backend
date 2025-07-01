@@ -1,0 +1,8 @@
+{application, chronos, [
+    {description, "Chronos backend"},
+    {vsn, "1.0.0"},
+    {modules, []},
+    {registered, []},
+    {applications, [sasl, erlcron, cerberus, db, slack, web]},
+    {mod, {chronos_app, []}}
+]}.

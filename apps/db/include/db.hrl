@@ -1,0 +1,5 @@
+-define(db_app, db).
+-define(db_pool, default).
+-define(db_schema, <<"public">>).
+-define(db_connect_timeout, 5000).
+-define(db_query_timeout, 120000).

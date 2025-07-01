@@ -1,0 +1,36 @@
+## Name of the node
+-name chronos_server@127.0.0.1
+
+## Cookie for distributed erlang
+-setcookie chronoslocal
+
+## Heartbeat management; auto-restarts VM if it dies or becomes unresponsive
+## (Disabled by default..use with caution!)
+##-heart
+
+## Enable kernel poll and a few 
++K true
+
+## Enable async threads
++A 3
+
+## Increase maximum number of processes
++P 100000
+
+## Set kernel interface
+-kernel inet_dist_use_interface {127,0,0,1}
+
+## Set epmd interface
+-env ERL_EPMD_ADDRESS 127.0.0.1
+
+## Increase number of concurrent ports/sockets
+-env ERL_MAX_PORTS 4096
+
+## Increase maximum number of ETS tables
+-env ERL_MAX_ETS_TABLES 8192
+
+## Tweak GC to run more often
+-env ERL_FULLSWEEP_AFTER 10
+
+## Enable Unicode
++pc unicode

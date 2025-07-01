@@ -1,0 +1,6 @@
+*.beam
+*.app
+builds
+build
+deps
+/erl_crash.dump

@@ -1,0 +1,14 @@
+-define(get, <<"GET">>).
+-define(head, <<"HEAD">>).
+-define(post, <<"POST">>).
+-define(put, <<"PUT">>).
+-define(patch, <<"PATCH">>).
+-define(delete, <<"DELETE">>).
+-define(options, <<"OPTIONS">>).
+
+-define(http_ok, 200).
+-define(http_bad_request, 400).
+-define(http_forbidden, 403).
+-define(http_not_found, 404).
+-define(http_conflict, 409).
+-define(http_internal_server_error, 500).

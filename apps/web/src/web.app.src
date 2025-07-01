@@ -1,0 +1,8 @@
+{application, web, [
+    {description, "Chronos web service"},
+    {vsn, "1.0.0"},
+    {modules, []},
+    {registered, []},
+    {applications, [kernel, stdlib, sasl, ssl, cowboy, db]},
+    {mod, {web_app, []}}
+]}.
